@@ -1,0 +1,11 @@
+body { background-color: #ECF3F7; font-family: 'Lato', sans-serif;}
+h1 { color: #204767; }
+p { font-size: 1.2em; }
+.navbar-default { background-color: #204767; }
+.navbar-default .navbar-brand { padding: 5px 15px; }
+.navbar-default .navbar-text { color: white; font-size: 18px; }
+.btn-primary { color: white; background-color: #20C5C0; border-color: #20C5C0; border-radius: 20px; }
+.btn-primary:hover { background-color: #189591; border-color: #189591; }
+.btn-primary:active { background-color: #189591; border-color: #189591; }
+.btn-primary:focus { background-color: #189591; border-color: #189591; }
+.btn-primary:active:focus { background-color: #189591; border-color: #189591; }
