@@ -1,0 +1,20 @@
+version: 1.0
+
+env:
+  variables:
+    DOCKER_BUILDKIT: '1'
+
+phases:
+  pre_build:
+    commands:
+      - 'REPOSITORY_HOST=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com'
+      - 'REPOSITORY_URI=$REPOSITORY_HOST/$REPOSITORY_NAME'
+      - 'aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $REPOSITORY_HOST'
+      - 'docker pull $REPOSITORY_URI:latest || true'
+  build:
+    commands:
+      - 'docker image build --cache-from $REPOSITORY_URI:latest -t $REPOSITORY_NAME .'
+  post_build:
+    commands:
+      - 'docker tag $REPOSITORY_NAME:latest $REPOSITORY_URI:latest && docker push $REPOSITORY_URI:latest'
+      - '[ -n "$CODEBUILD_BUILD_NUMBER" ] && VERSION=build$CODEBUILD_BUILD_NUMBER && docker tag $REPOSITORY_NAME:latest $REPOSITORY_URI:$VERSION && docker push $REPOSITORY_URI:$VERSION'
