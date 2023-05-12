@@ -13,7 +13,7 @@ phases:
       - 'docker pull $REPOSITORY_URI:latest || true'
   build:
     commands:
-      - 'docker image build --cache-from $REPOSITORY_URI:latest -t $REPOSITORY_NAME .'
+      - 'docker image build --pull -t $REPOSITORY_NAME .'
   post_build:
     commands:
       - 'docker tag $REPOSITORY_NAME:latest $REPOSITORY_URI:latest && docker push $REPOSITORY_URI:latest'
