@@ -106,6 +106,11 @@ class SnapPassRoutesTestCase(TestCase):
         snappass.app.config['TESTING'] = True
         self.app = snappass.app.test_client()
 
+    def test_health_check(self):
+        response = self.app.get('/_/_/health')
+        self.assertEqual('200 OK', response.status)
+        self.assertEqual('{}', response.get_data(as_text=True).strip())
+
     def test_preview_password(self):
         password = "I like novelty kitten statues!"
         key = snappass.set_password(password, 30)
@@ -146,6 +151,44 @@ class SnapPassRoutesTestCase(TestCase):
                 '/',
                 headers={'Accept': 'application/json'},
                 data={'password': password, 'ttl': 'two weeks'},
+            )
+
+            json_content = rv.get_json()
+            key = re.search(r'https://localhost/([^"]+)', json_content['link']).group(1)
+            key = unquote(key)
+
+            frozen_time.move_to("2020-05-22 11:59:59")
+            self.assertEqual(snappass.get_password(key), password)
+
+            frozen_time.move_to("2020-05-22 12:00:00")
+            self.assertIsNone(snappass.get_password(key))
+
+    def test_set_password_api(self):
+        with freeze_time("2020-05-08 12:00:00") as frozen_time:
+            password = 'my name is my passport. verify me.'
+            rv = self.app.post(
+                '/api/set_password/',
+                headers={'Accept': 'application/json'},
+                json={'password': password, 'ttl': '1209600'},
+            )
+
+            json_content = rv.get_json()
+            key = re.search(r'https://localhost/([^"]+)', json_content['link']).group(1)
+            key = unquote(key)
+
+            frozen_time.move_to("2020-05-22 11:59:59")
+            self.assertEqual(snappass.get_password(key), password)
+
+            frozen_time.move_to("2020-05-22 12:00:00")
+            self.assertIsNone(snappass.get_password(key))
+
+    def test_set_password_api_default_ttl(self):
+        with freeze_time("2020-05-08 12:00:00") as frozen_time:
+            password = 'my name is my passport. verify me.'
+            rv = self.app.post(
+                '/api/set_password/',
+                headers={'Accept': 'application/json'},
+                json={'password': password},
             )
 
             json_content = rv.get_json()

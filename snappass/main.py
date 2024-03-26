@@ -7,15 +7,15 @@ import redis
 from cryptography.fernet import Fernet
 from flask import abort, Flask, render_template, request, jsonify
 from redis.exceptions import ConnectionError
-from werkzeug.urls import url_quote_plus
-from werkzeug.urls import url_unquote_plus
+from urllib.parse import quote_plus
+from urllib.parse import unquote_plus
 from distutils.util import strtobool
+from flask_babel import Babel
 
 NO_SSL = bool(strtobool(os.environ.get('NO_SSL', 'False')))
 URL_PREFIX = os.environ.get('URL_PREFIX', None)
 HOST_OVERRIDE = os.environ.get('HOST_OVERRIDE', None)
 TOKEN_SEPARATOR = '~'
-
 
 # Initialize Flask Application
 app = Flask(__name__)
@@ -25,9 +25,18 @@ app.secret_key = os.environ.get('SECRET_KEY', 'Secret Key')
 app.config.update(
     dict(STATIC_URL=os.environ.get('STATIC_URL', 'static')))
 
+
+# Set up Babel
+def get_locale():
+    return request.accept_languages.best_match(['en', 'es', 'de', 'nl'])
+
+
+babel = Babel(app, locale_selector=get_locale)
+
 # Initialize Redis
 if os.environ.get('MOCK_REDIS'):
     from fakeredis import FakeStrictRedis
+
     redis_client = FakeStrictRedis()
 elif os.environ.get('REDIS_URL'):
     redis_client = redis.StrictRedis.from_url(os.environ.get('REDIS_URL'))
@@ -39,7 +48,10 @@ else:
         host=redis_host, port=redis_port, db=redis_db)
 REDIS_PREFIX = os.environ.get('REDIS_PREFIX', 'snappass')
 
-TIME_CONVERSION = {'two weeks': 1209600, 'week': 604800, 'day': 86400, 'hour': 3600}
+TIME_CONVERSION = {'two weeks': 1209600, 'week': 604800, 'day': 86400,
+                   'hour': 3600}
+DEFAULT_API_TTL = 1209600
+MAX_TTL = DEFAULT_API_TTL
 
 
 def check_redis_alive(fn):
@@ -54,6 +66,7 @@ def check_redis_alive(fn):
                 sys.exit(0)
             else:
                 return abort(500)
+
     return inner
 
 
@@ -154,6 +167,22 @@ def clean_input():
     return TIME_CONVERSION[time_period], request.form['password']
 
 
+def set_base_url(req):
+    if NO_SSL:
+        if HOST_OVERRIDE:
+            base_url = f'http://{HOST_OVERRIDE}/'
+        else:
+            base_url = req.url_root
+    else:
+        if HOST_OVERRIDE:
+            base_url = f'https://{HOST_OVERRIDE}/'
+        else:
+            base_url = req.url_root.replace("http://", "https://")
+    if URL_PREFIX:
+        base_url = base_url + URL_PREFIX.strip("/") + "/"
+    return base_url
+
+
 @app.route('/', methods=['GET'])
 def index():
     return render_template('set_password.html')
@@ -161,31 +190,38 @@ def index():
 
 @app.route('/', methods=['POST'])
 def handle_password():
-    ttl, password = clean_input()
-    token = set_password(password, ttl)
-
-    if NO_SSL:
-        if HOST_OVERRIDE:
-            base_url = f'http://{HOST_OVERRIDE}/'
+    password = request.form.get('password')
+    ttl = request.form.get('ttl')
+    if clean_input():
+        ttl = TIME_CONVERSION[ttl.lower()]
+        token = set_password(password, ttl)
+        base_url = set_base_url(request)
+        link = base_url + quote_plus(token)
+        if request.accept_mimetypes.accept_json and not \
+           request.accept_mimetypes.accept_html:
+            return jsonify(link=link, ttl=ttl)
         else:
-            base_url = request.url_root
+            return render_template('confirm.html', password_link=link)
     else:
-        if HOST_OVERRIDE:
-            base_url = f'https://{HOST_OVERRIDE}/'
-        else:
-            base_url = request.url_root.replace("http://", "https://")
-    if URL_PREFIX:
-        base_url = base_url + URL_PREFIX.strip("/") + "/"
-    link = base_url + url_quote_plus(token)
-    if request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+        abort(500)
+
+
+@app.route('/api/set_password/', methods=['POST'])
+def api_handle_password():
+    password = request.json.get('password')
+    ttl = int(request.json.get('ttl', DEFAULT_API_TTL))
+    if password and isinstance(ttl, int) and ttl <= MAX_TTL:
+        token = set_password(password, ttl)
+        base_url = set_base_url(request)
+        link = base_url + quote_plus(token)
         return jsonify(link=link, ttl=ttl)
     else:
-        return render_template('confirm.html', password_link=link)
+        abort(500)
 
 
 @app.route('/<password_key>', methods=['GET'])
 def preview_password(password_key):
-    password_key = url_unquote_plus(password_key)
+    password_key = unquote_plus(password_key)
     if not password_exists(password_key):
         return render_template('expired.html'), 404
 
@@ -194,12 +230,18 @@ def preview_password(password_key):
 
 @app.route('/<password_key>', methods=['POST'])
 def show_password(password_key):
-    password_key = url_unquote_plus(password_key)
+    password_key = unquote_plus(password_key)
     password = get_password(password_key)
     if not password:
         return render_template('expired.html'), 404
 
     return render_template('password.html', password=password)
+
+
+@app.route('/_/_/health', methods=['GET'])
+@check_redis_alive
+def health_check():
+    return {}
 
 
 @check_redis_alive
